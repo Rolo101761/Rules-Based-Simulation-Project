@@ -23,6 +23,51 @@
 # ============================================================
 
 # Run from the project root (e.g. `Rscript R/model5_tf_active_dna_seq.R`).
+#
+# Rate-balancing knobs are overridable via --key=value CLI args, e.g.:
+#   Rscript R/model5_tf_active_dna_seq.R --meUp_sampler_K4=9000 --n_iter=30 --verbose=FALSE --sim_tag=trial01
+# This is the interface the Phase 1 scikit-optimize loop (python/optimize_phase1.py) drives.
+
+.default_params <- list(
+  meUp_sampler_K4    = 12000,  # H3K4 nucleosome sampling rate per iteration
+  meDown_K4          = 23000,  # H3K4 demethylation sampling rate per iteration
+  meUp_sampler_K9    = 12000,  # H3K9 nucleosome sampling rate per iteration
+  meDown_K9          = 13000,  # H3K9 demethylation sampling rate per iteration
+  meUp_sampler_K27   = 12000,  # H3K27 nucleosome sampling rate per iteration
+  meDown_K27         = 19000,  # H3K27 demethylation sampling rate per iteration
+  K27_spread_abu     = 5000,   # bf_K27_meUp_spread abundance (PRC2/EED self-recruitment rate)
+  tf_K9_target_frac  = 0.78,   # target fraction of nucleosomes in tf_K9_active pool (motif-seeded + random fill)
+  tf_K27_target_frac = 0.40,   # target fraction of nucleosomes in tf_K27_active pool (random, no PRC2 motif in yeast)
+  n_iter             = 100,    # number of runLayerBinding.BSgenome iterations
+  verbose            = TRUE,   # GenomicLayers per-binding-factor match logging
+  seed               = NA,     # RNG seed; NA leaves runs stochastic (the script default before parameterization)
+  sim_tag            = ""      # appended to output filenames so parallel/repeated trials don't clobber each other
+)
+
+.parse_cli_args <- function(defaults) {
+  params <- defaults
+  for (a in commandArgs(trailingOnly = TRUE)) {
+    if (!startsWith(a, "--")) next
+    kv <- sub("^--", "", a)
+    parts <- strsplit(kv, "=", fixed = TRUE)[[1]]
+    key <- parts[1]
+    if (!key %in% names(defaults)) stop(sprintf("Unknown parameter: --%s", key))
+    value <- paste(parts[-1], collapse = "=")
+    default_val <- defaults[[key]]
+    params[[key]] <- if (is.character(default_val)) {
+      value
+    } else if (is.logical(default_val)) {
+      as.logical(value)
+    } else {
+      as.numeric(value)
+    }
+  }
+  params
+}
+
+params <- .parse_cli_args(.default_params)
+if (!is.na(params$seed)) set.seed(params$seed)
+
 simName <- "Model_5_Rule3_only"
 outputDir <- paste0("output/", simName, "/")
 if(!file.exists(outputDir)) dir.create(outputDir, recursive = TRUE)
@@ -378,7 +423,7 @@ names(bf_methylate_abu) <- names(bfList_H3K4_methylate)
 bf_K9_methylate_abu <- c(12000, rep(saturationAbundance, 5))
 names(bf_K9_methylate_abu) <- names(bfList_H3K9_methylate)
 
-bf_K27_methylate_abu <- c(12000, saturationAbundance, 5000, rep(saturationAbundance, 4))
+bf_K27_methylate_abu <- c(params$meUp_sampler_K27, saturationAbundance, params$K27_spread_abu, rep(saturationAbundance, 4))
 names(bf_K27_methylate_abu) <- names(bfList_H3K27_methylate)
 
 bf_demethylate_abu <- c(0, rep(saturationAbundance, 4))
@@ -428,10 +473,10 @@ tf_K4_factorSet <- list(bf_TF_K4=bf_TF_K4)
 tf_K4_abu <- c(saturationAbundance)
 names(tf_K4_abu) <- names(tf_K4_factorSet)
 
-scLayerSetNuc <- runLayerBinding.BSgenome(layerList = scLayerSetNuc, 
-                                          factorSet = tf_K4_factorSet, 
-                                          bf.abundances = tf_K4_abu, 
-                                          verbose = T)
+scLayerSetNuc <- runLayerBinding.BSgenome(layerList = scLayerSetNuc,
+                                          factorSet = tf_K4_factorSet,
+                                          bf.abundances = tf_K4_abu,
+                                          verbose = params$verbose)
 
 K4_cov <- sum(width(reduce(scLayerSetNuc$layerSet$tf_K4_active))) / sum(as.numeric(seqlengths(genome))) * 100
 cat(sprintf("tf_K4_active coverage: %.2f%%\n", K4_cov))
@@ -443,10 +488,10 @@ tf_K9_factorSet <- list(bf_TF_K9=bf_TF_K9)
 tf_K9_abu <- c(saturationAbundance)
 names(tf_K9_abu) <- names(tf_K9_factorSet)
 
-scLayerSetNuc <- runLayerBinding.BSgenome(layerList = scLayerSetNuc, 
-                                          factorSet = tf_K9_factorSet, 
-                                          bf.abundances = tf_K9_abu, 
-                                          verbose = T)
+scLayerSetNuc <- runLayerBinding.BSgenome(layerList = scLayerSetNuc,
+                                          factorSet = tf_K9_factorSet,
+                                          bf.abundances = tf_K9_abu,
+                                          verbose = params$verbose)
 
 K9_cov <- sum(width(reduce(scLayerSetNuc$layerSet$tf_K9_active))) / sum(as.numeric(seqlengths(genome))) * 100
 cat(sprintf("tf_K9_active motif coverage: %.2f%%\n", K9_cov))
@@ -458,7 +503,7 @@ nuc_in_K9 <- unique(queryHits(findOverlaps(scLayerSetNuc$layerSet$nucleosome,
                                            scLayerSetNuc$layerSet$tf_K9_active)))
 cat(sprintf("Nucleosomes in motif-seeded K9 regions: %d\n", length(nuc_in_K9)))
 
-target_K9_nucs <- round(0.78 * total_nucs)
+target_K9_nucs <- round(params$tf_K9_target_frac * total_nucs)
 remaining_needed <- target_K9_nucs - length(nuc_in_K9)
 
 if(remaining_needed > 0) {
@@ -475,7 +520,7 @@ cat(sprintf("Final tf_K9_active coverage: %.2f%% (target 62%%)\n", K9_cov))
 
 # K27: Random subset (yeast lacks PRC2 — no biological motif available)
 cat("\n=== K27: Random targeting (no PRC2 in yeast) ===\n")
-nK27 <- round(0.40 * total_nucs)
+nK27 <- round(params$tf_K27_target_frac * total_nucs)
 K27_nucs <- sample(1:total_nucs, nK27, replace=FALSE)
 scLayerSetNuc$layerSet$tf_K27_active <- scLayerSetNuc$layerSet$nucleosome[K27_nucs]
 
@@ -585,22 +630,22 @@ bfLIst_both_eFirst <- bfLIst_both[names(bfAbund_both_eFirst)]
 for(thisAbund in abundSpread) {
   scLayerSetBothAbund <- scLayerSetBoth
   
-  bfAbund_both_eFirst["bf_meUp_sampler"] <- 12000
-  bfAbund_both_eFirst["bf_meDown"] <- 23000
-  bfAbund_both_eFirst["bf_K9_meUp_sampler"] <- 12000
-  bfAbund_both_eFirst["bf_K9_meDown"] <- 13000
-  bfAbund_both_eFirst["bf_K27_meUp_sampler"] <- 12000
-  bfAbund_both_eFirst["bf_K27_meDown"] <- 19000
-  
-  subSimName <- paste0("Model2B_motif.w", bfAbund_both_eFirst["bf_meUp_sampler"], ".e", thisAbund)
+  bfAbund_both_eFirst["bf_meUp_sampler"] <- params$meUp_sampler_K4
+  bfAbund_both_eFirst["bf_meDown"] <- params$meDown_K4
+  bfAbund_both_eFirst["bf_K9_meUp_sampler"] <- params$meUp_sampler_K9
+  bfAbund_both_eFirst["bf_K9_meDown"] <- params$meDown_K9
+  bfAbund_both_eFirst["bf_K27_meUp_sampler"] <- params$meUp_sampler_K27
+  bfAbund_both_eFirst["bf_K27_meDown"] <- params$meDown_K27
+
+  subSimName <- if (nzchar(params$sim_tag)) params$sim_tag else paste0("Model2B_motif.w", bfAbund_both_eFirst["bf_meUp_sampler"], ".e", thisAbund)
   print(subSimName)
-  
-  for(i in 1:100) {
-    print(i)
-    scLayerSetBothAbund <- runLayerBinding.BSgenome(layerList = scLayerSetBothAbund, 
-                                                    factorSet = bfLIst_both_eFirst, 
-                                                    bf.abundances = bfAbund_both_eFirst, 
-                                                    verbose = T, collect.stats = T, keep.stats = T)
+
+  for(i in 1:params$n_iter) {
+    if (params$verbose) print(i)
+    scLayerSetBothAbund <- runLayerBinding.BSgenome(layerList = scLayerSetBothAbund,
+                                                    factorSet = bfLIst_both_eFirst,
+                                                    bf.abundances = bfAbund_both_eFirst,
+                                                    verbose = params$verbose, collect.stats = T, keep.stats = T)
     
     current_states <- get_all_states_fast(scLayerSetBothAbund$layerSet)
     if(i > 1) update_tracking_fast(i)
@@ -618,7 +663,7 @@ for(thisAbund in abundSpread) {
       scLayerSetBothAbund$layerSet[["sampled_K27_meUp"]] <- removeGRangesBySize(x=scLayerSetBothAbund$layerSet[["sampled_K27_meUp"]], verbose=T, maxSize=0)
     }
     
-    if(i %% 10 == 0) {
+    if(params$verbose && i %% 10 == 0) {
       ymax <- max(
         scLayerSetBothAbund$history$nBlocks.H3K4me3,
         scLayerSetBothAbund$history$nBlocks.H3K4me2,
@@ -713,7 +758,20 @@ for(thisAbund in abundSpread) {
   RMSE_me3 <-sqrt(mean((reached[c(3,6,9)]- targets[c(3,6,9)])^2))
   cat(sprintf("\nRMSE (all 9 states): %.3f\n", RMSE_all))
   cat(sprintf("RMSE (me3 only): %.3f\n", RMSE_me3))
-  
+
+  # Machine-readable objective for the Phase 1 scikit-optimize loop
+  # (hand-built JSON to avoid a jsonlite dependency — structure is fixed and flat)
+  mark_names <- c("H3K4me1","H3K4me2","H3K4me3","H3K9me1","H3K9me2","H3K9me3","H3K27me1","H3K27me2","H3K27me3")
+  objective_path <- paste0(outputDir, subSimName, ".objective.json")
+  writeLines(c(
+    "{",
+    sprintf('  "RMSE_all": %.6f,', RMSE_all),
+    sprintf('  "RMSE_me3": %.6f,', RMSE_me3),
+    sprintf('  "coverage": {%s}', paste(sprintf('"%s": %.6f', mark_names, reached), collapse=", ")),
+    "}"
+  ), objective_path)
+  cat(sprintf("\nOBJECTIVE_JSON: %s\n", objective_path))
+
   # 4. CO-OCCURRENCE
   calc_overlap <- function(layer1, layer2) {
     if(length(scLayerSetBothAbund$layerSet[[layer1]]) == 0) return(0)
