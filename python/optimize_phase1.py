@@ -1,11 +1,11 @@
 """
-Phase 1 Bayesian optimization: tune the sacCer3 Model 5 GenomicLayers rate
-knobs (R/model5_tf_active_dna_seq.R) to minimize RMSE against the 9 empirical
-H3K4/H3K9/H3K27 me1/me2/me3 coverage targets.
+Phase 1 Bayesian optimization: tune the sacCer3 coupled 4-mark GenomicLayers
+rate knobs (R/model5_tf_active_dna_seq.R) to minimize RMSE against the 9
+empirical H3K4/H3K9/H3K27 me1/me2/me3 coverage targets.
 
 Each trial shells out to `Rscript R/model5_tf_active_dna_seq.R --key=value ...`,
 which runs a full sacCer3 simulation and writes a small JSON objective file to
-output/Model_5_Rule3_only/<sim_tag>.objective.json. This script reads that
+output/sacCer3_coupled_model/<sim_tag>.objective.json. This script reads that
 JSON back as the objective value for scikit-optimize.
 
 Usage:
@@ -29,7 +29,7 @@ from skopt.utils import use_named_args
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 R_SCRIPT = REPO_ROOT / "R" / "model5_tf_active_dna_seq.R"
-OUTPUT_DIR = REPO_ROOT / "output" / "Model_5_Rule3_only"
+OUTPUT_DIR = REPO_ROOT / "output" / "sacCer3_coupled_model"
 
 SPACE = [
     Integer(3000, 30000, name="meUp_sampler_K4"),

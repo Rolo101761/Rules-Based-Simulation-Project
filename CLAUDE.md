@@ -54,7 +54,7 @@ so a Python optimizer can drive it:
 `--meUp_sampler_K4/K9/K27`, `--meDown_K4/K9/K27` (sampling rates per iteration),
 `--K27_spread_abu` (PRC2/EED self-recruitment rate), `--tf_K9_target_frac`,
 `--tf_K27_target_frac` (tf_active pool sizes), plus `--n_iter`, `--verbose`, `--seed`,
-`--sim_tag`. It writes a machine-readable `output/Model_5_Rule3_only/<sim_tag>.objective.json`
+`--sim_tag`. It writes a machine-readable `output/sacCer3_coupled_model/<sim_tag>.objective.json`
 (RMSE_all, RMSE_me3, per-mark coverage) after each run.
 
 `python/optimize_phase1.py` drives this with `skopt.gp_minimize` over the 9 knobs above,

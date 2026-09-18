@@ -1,5 +1,5 @@
 # ============================================================
-# MODEL 5 - DNA motif-seeded tf_active per mark RULE 3 ONLY
+# sacCer3 coupled 4-mark model — DNA motif-seeded tf_active + all 3 rules
 # ============================================================
 # Extension of Dave's architecture with biologically-grounded targeting:
 #   K4: TATA box (TATATAAA) marks active/regulated promoters
@@ -16,10 +16,12 @@
 # - Genome-wide sampler, tf_active filtering at bf_meUp stage
 # - bf_meDown targets all nucleosomes
 #
-# Rules:
-#   Rule 1: K4me3 blocks K27me3 (at bf_meUp and me2→me3)
-#   Rule 2: K9me3 blocks K4me3 (at bf_meUp and me2→me3)
-#   Rule 3: K27me3 self-recruitment (spreading)
+# Rules (all three genuinely wired into the binding factors, enforced both at
+# initial targeting (bf_meUp/bf_K27_meUp) and at the me2->me3 promotion step,
+# plus a per-iteration cleanup pass as a same-iteration ordering safety net):
+#   Rule 1: K4me3 blocks K27me3
+#   Rule 2: K9me3 blocks K4me3 (K27me3 also blocks K4me3 at me2->me3)
+#   Rule 3: K27me3 self-recruitment (spreading), itself blocked by K4me3
 # ============================================================
 
 # Run from the project root (e.g. `Rscript R/model5_tf_active_dna_seq.R`).
@@ -68,7 +70,7 @@
 params <- .parse_cli_args(.default_params)
 if (!is.na(params$seed)) set.seed(params$seed)
 
-simName <- "Model_5_Rule3_only"
+simName <- "sacCer3_coupled_model"
 outputDir <- paste0("output/", simName, "/")
 if(!file.exists(outputDir)) dir.create(outputDir, recursive = TRUE)
 
@@ -120,10 +122,10 @@ bf_meUp_sampler <- createBindingFactor.layer_region(name="bf_meUp_sampler",
                                                     stateWidth= nucleosomeWidth)
 
 # Requires tf_K4_active AND sampled AND NOT K9me3 (Rule 2)
-bf_meUp <- createBindingFactor.layer_region(name="bf_meUp", 
-                                            profile.layers=c("tf_K4_active", "sampled_meUp"), 
+bf_meUp <- createBindingFactor.layer_region(name="bf_meUp",
+                                            profile.layers=c("tf_K4_active", "sampled_meUp", "H3K9me3"),
                                             patternLength = 6,
-                                            profile.marks = c(1, 1),
+                                            profile.marks = c(1, 1, 0),
                                             mod.layers="H3K4me_promotion",
                                             mod.marks=1,
                                             stateWidth= 6 + (2*nucleosomeWidth))
@@ -144,10 +146,10 @@ bf_promotion_1_2 <- createBindingFactor.layer_region(name="bf_promotion_1_2",
                                                      mod.marks = c(0, 0,1,0,1))
 
 # Rule 2: K9me3 blocks K4 at me2→me3
-bf_promotion_2_3 <- createBindingFactor.layer_region(name="bf_promotion_2_3", 
-                                                     patternLength = nucleosomeWidth, 
-                                                     profile.layers = c("nucleosome", "H3K4me_promotion", "H3K4me1", "H3K4me2", "H3K4me3"),
-                                                     profile.marks = c(1,1,0,1,0), 
+bf_promotion_2_3 <- createBindingFactor.layer_region(name="bf_promotion_2_3",
+                                                     patternLength = nucleosomeWidth,
+                                                     profile.layers = c("nucleosome", "H3K4me_promotion", "H3K9me3", "H3K27me3", "H3K4me1", "H3K4me2", "H3K4me3"),
+                                                     profile.marks = c(1,1,0,0,0,1,0),
                                                      mod.layers = c("H3K4me_promotion", "H3K4me1", "H3K4me2", "H3K4me3", "H3K4me_any"),
                                                      mod.marks = c(0, 0,0,1,1))
 
@@ -298,10 +300,10 @@ bf_K27_meUp_sampler <- createBindingFactor.layer_region(name="bf_K27_meUp_sample
                                                         stateWidth= nucleosomeWidth)
 
 # Rule 1: K4me3 blocks K27
-bf_K27_meUp <- createBindingFactor.layer_region(name="bf_K27_meUp", 
-                                                profile.layers=c("tf_K27_active", "sampled_K27_meUp"), 
+bf_K27_meUp <- createBindingFactor.layer_region(name="bf_K27_meUp",
+                                                profile.layers=c("tf_K27_active", "sampled_K27_meUp", "H3K4me3"),
                                                 patternLength = 6,
-                                                profile.marks = c(1, 1),
+                                                profile.marks = c(1, 1, 0),
                                                 mod.layers="H3K27me_promotion",
                                                 mod.marks=1,
                                                 stateWidth= 6 + (2*nucleosomeWidth))
@@ -331,10 +333,10 @@ bf_K27_promotion_1_2 <- createBindingFactor.layer_region(name="bf_K27_promotion_
                                                          mod.marks = c(0, 0,1,0,1))
 
 # Rule 1: K4me3 blocks K27 at me2→me3
-bf_K27_promotion_2_3 <- createBindingFactor.layer_region(name="bf_K27_promotion_2_3", 
-                                                         patternLength = nucleosomeWidth, 
-                                                         profile.layers = c("nucleosome", "H3K27me_promotion", "H3K27me1", "H3K27me2", "H3K27me3"),
-                                                         profile.marks = c(1,1,0,1,0), 
+bf_K27_promotion_2_3 <- createBindingFactor.layer_region(name="bf_K27_promotion_2_3",
+                                                         patternLength = nucleosomeWidth,
+                                                         profile.layers = c("nucleosome", "H3K27me_promotion", "H3K4me3", "H3K27me1", "H3K27me2", "H3K27me3"),
+                                                         profile.marks = c(1,1,0,0,1,0),
                                                          mod.layers = c("H3K27me_promotion", "H3K27me1", "H3K27me2", "H3K27me3", "H3K27me_any"),
                                                          mod.marks = c(0, 0,0,1,1))
 
@@ -655,12 +657,22 @@ for(thisAbund in abundSpread) {
         scLayerSetBothAbund$layerSet[[thisLayer]] <- removeShortGRanges(x=scLayerSetBothAbund$layerSet[[thisLayer]], minSize = nucleosomeWidth)
       }
       
-      # no rule enforcement needed for rule 3 script only.
-      
-      scLayerSetBothAbund$layerSet[["nucleosome"]] <- removeGRangesBySize(x=scLayerSetBothAbund$layerSet[["nucleosome"]], verbose=T, minSize=nucleosomeWidth, maxSize=nucleosomeWidth)
-      scLayerSetBothAbund$layerSet[["sampled_meUp"]] <- removeGRangesBySize(x=scLayerSetBothAbund$layerSet[["sampled_meUp"]], verbose=T, maxSize=0)
-      scLayerSetBothAbund$layerSet[["sampled_K9_meUp"]] <- removeGRangesBySize(x=scLayerSetBothAbund$layerSet[["sampled_K9_meUp"]], verbose=T, maxSize=0)
-      scLayerSetBothAbund$layerSet[["sampled_K27_meUp"]] <- removeGRangesBySize(x=scLayerSetBothAbund$layerSet[["sampled_K27_meUp"]], verbose=T, maxSize=0)
+      # Rule enforcement cleanup: strip promotion flags that snuck through within
+      # the same iteration despite the binding-factor antagonism conditions above
+      # (ordering safety net — see Rule 1/Rule 2 in bf_meUp/bf_K27_meUp/bf_*_promotion_2_3).
+      if(length(scLayerSetBothAbund$layerSet$H3K4me_promotion) > 0 && length(scLayerSetBothAbund$layerSet$H3K9me3) > 0) {
+        K4_blocked <- findOverlaps(scLayerSetBothAbund$layerSet$H3K4me_promotion, scLayerSetBothAbund$layerSet$H3K9me3)
+        if(length(K4_blocked) > 0) scLayerSetBothAbund$layerSet$H3K4me_promotion <- scLayerSetBothAbund$layerSet$H3K4me_promotion[-unique(queryHits(K4_blocked))]
+      }
+      if(length(scLayerSetBothAbund$layerSet$H3K27me_promotion) > 0 && length(scLayerSetBothAbund$layerSet$H3K4me3) > 0) {
+        K27_blocked <- findOverlaps(scLayerSetBothAbund$layerSet$H3K27me_promotion, scLayerSetBothAbund$layerSet$H3K4me3)
+        if(length(K27_blocked) > 0) scLayerSetBothAbund$layerSet$H3K27me_promotion <- scLayerSetBothAbund$layerSet$H3K27me_promotion[-unique(queryHits(K27_blocked))]
+      }
+
+      scLayerSetBothAbund$layerSet[["nucleosome"]] <- removeGRangesBySize(x=scLayerSetBothAbund$layerSet[["nucleosome"]], verbose=params$verbose, minSize=nucleosomeWidth, maxSize=nucleosomeWidth)
+      scLayerSetBothAbund$layerSet[["sampled_meUp"]] <- removeGRangesBySize(x=scLayerSetBothAbund$layerSet[["sampled_meUp"]], verbose=params$verbose, maxSize=0)
+      scLayerSetBothAbund$layerSet[["sampled_K9_meUp"]] <- removeGRangesBySize(x=scLayerSetBothAbund$layerSet[["sampled_K9_meUp"]], verbose=params$verbose, maxSize=0)
+      scLayerSetBothAbund$layerSet[["sampled_K27_meUp"]] <- removeGRangesBySize(x=scLayerSetBothAbund$layerSet[["sampled_K27_meUp"]], verbose=params$verbose, maxSize=0)
     }
     
     if(params$verbose && i %% 10 == 0) {
