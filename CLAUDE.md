@@ -52,9 +52,28 @@ Note: Coupling 3 (K27→EED→K27) is the self-recruitment/positive-feedback des
 
 ## Phase 1 progress
 
-Ported the most mature prior sacCer3 model (`Model 5 tf_active +DNA seq.R` from the
-OneDrive research folder) into `R/model5_tf_active_dna_seq.R`, with hardcoded
-OneDrive/Windows paths replaced by relative paths (run from repo root).
+`R/model5_tf_active_dna_seq.R` (filename kept for continuity, content corrected —
+see below) is the sacCer3 DNA-motif-seeded coupled model, ported from the OneDrive
+research folder with hardcoded OneDrive/Windows paths replaced by relative paths
+(run from repo root).
+
+**Correction applied:** initially ported from `Model 5 tf_active +DNA seq.R`, which
+per the MSc 5-model framework (M2 = all rules active, M3/M4/M5 = one rule each) is
+the Rule-3-only ablation — its header even says so, but stray Rule 1/2 comments left
+in the binding-factor code made it look like all three rules were wired when they
+weren't (confirmed by reading the actual `profile.layers`, not the comments — the
+antagonist mark was simply missing from `bf_promotion_2_3`/`bf_K27_promotion_2_3`/
+`bf_meUp`/`bf_K27_meUp`). Fixed by porting the genuinely-all-rules-active logic from
+`Model 2 tf_active + DNA sequence.R` (M2 in the MSc framework): antagonism is now
+enforced at both the initial targeting stage AND the me2→me3 promotion step, plus a
+per-iteration cleanup pass that strips any promotion flag that slipped through a
+same-iteration ordering race. Verified: RULE 1 and RULE 2 self-validation both
+genuinely PASS now (K4me3+K27me3 bivalency 0.00%, K9me3+K4me3 co-occurrence 0.35%,
+vs. 13.18%/coincidental-2.87% before the fix). Output dir renamed
+`Model_5_Rule3_only` → `sacCer3_coupled_model` to stop implying it's an ablation.
+Lesson: when porting from prior research scripts, verify binding-factor
+`profile.layers`/`profile.marks` directly — comments in this codebase have drifted
+from the code they describe at least once already.
 
 The script now takes the rate-balancing knobs as CLI args instead of hardcoded values,
 so a Python optimizer can drive it:
