@@ -43,6 +43,13 @@ R deps (GenomicLayers, Biostrings, GenomicRanges, BSgenome.Scerevisiae.UCSC.sacC
 TxDb.Scerevisiae.UCSC.sacCer3.sgdGene) are already installed locally — no setup needed.
 Python: `.venv/` at repo root has scikit-optimize installed (`python/requirements.txt`).
 
+## Tech + refs
+
+### Objective function (Phase 1+)
+Score simulated mark abundances against target abundances using RMSE + R² (as in prior MSc sacCer3 work). skopt minimises RMSE across all 9 states, sub-saturation promotion params are the search space.
+
+Note: Coupling 3 (K27→EED→K27) is the self-recruitment/positive-feedback design (MSc "Rule 3A") — not the earlier two-speed-eraser variant (MSc "Rule 3") gated on K9 presence. Don't conflate the two; 3A was the one that worked.
+
 ## Phase 1 progress
 
 Ported the most mature prior sacCer3 model (`Model 5 tf_active +DNA seq.R` from the
@@ -90,3 +97,7 @@ No Co-Authored-By lines in commits — user's name only.
 - GenomicLayers installs from GitHub, not CRAN.
 - Local repo, not cloud-synced.
 - Flag partial/stubbed work as partial — don't present a stub as finished.
+
+## Future expansions
+- Ablate one coupling at a time (transcription-sharing, antagonism, spreading) against a no-couplings baseline and an all-couplings full model.
+- MSc 5-model framework (for ablation experiments): M1 = no rules (baseline) · M2 = all rules active · M3/M4/M5 = one rule active each (isolates that rule's contribution). Same logic applies here.
