@@ -30,9 +30,12 @@
 # Run from the repo root:
 #   Rscript R/dm6_coupled_model.R --chroms=chr4 --n_iter=50 --sim_tag=dev01
 # Whole-slice options: --chroms=chr4,chrY (comma-separated seqnames)
+# Sub-chromosome slice: --region=chr3R:1-4600000  (pericentromeric chr3R: dodeca/DMSAT6 satellite block in the first ~1 Mb;
+#   tests satellite->K9 seeding). Genome layers keep the full chromosome, but nucleosomes/pools/coverage/stats are confined to the region.
 
 .default_params <- list(
   chroms             = "chr4",   # comma-separated dm6 seqnames to simulate (development slice)
+  region             = "",       # optional sub-chromosome slice "chr3R:1-4600000" (overrides --chroms; nucleosomes, seeds and stats confined to it)
   meUp_sampler_K4    = 12000,    # sacCer3-equivalent per-iteration rates (sacCer3 script defaults, untuned for dm6)
   meDown_K4          = 23000,
   meUp_sampler_K9    = 12000,
@@ -99,12 +102,25 @@ suppressMessages({
   require(TxDb.Dmelanogaster.UCSC.dm6.ensGene)
 })
 
-slice_chroms <- strsplit(params$chroms, ",", fixed = TRUE)[[1]]
+use_region <- nzchar(params$region)
+if (use_region) {
+  rp <- regmatches(params$region, regexec("^([^:]+):([0-9]+)-([0-9]+)$", params$region))[[1]]
+  if (length(rp) != 4) stop("--region must look like chr3R:1-4600000")
+  slice_chroms <- rp[2]
+} else {
+  slice_chroms <- strsplit(params$chroms, ",", fixed = TRUE)[[1]]
+}
 genome <- keepBSgenomeSequences(BSgenome.Dmelanogaster.UCSC.dm6, slice_chroms)
-genome_size <- sum(as.numeric(seqlengths(genome)))
+if (use_region) {
+  region_gr <- GRanges(rp[2], IRanges(as.integer(rp[3]), min(as.integer(rp[4]), seqlengths(genome)[[rp[2]]])), seqinfo = seqinfo(genome))
+  genome_size <- width(region_gr)              # coverage denominators are the region, not the whole chromosome
+} else {
+  genome_size <- sum(as.numeric(seqlengths(genome)))
+}
+slice_label <- if (use_region) params$region else params$chroms
 nucleosomeWidth <- 147
 saturationAbundance <- 1000000
-cat(sprintf("Slice: %s (%.2f Mb)\n", params$chroms, genome_size / 1e6))
+cat(sprintf("Slice: %s (%.2f Mb)\n", slice_label, genome_size / 1e6))
 
 
 # SEQUENCE-ANCHORED SEED FACTORS (K4 / K9 / K27 tf_active pools) ----------
@@ -150,6 +166,7 @@ scLayerSetNuc$layerSet[["nucleosome"]] <- randGrangesBigGenome(genome = genome,
                                                                gapFunc = function(n, value) rpois(n = n, lambda = value),
                                                                argsSizeFunc = list(value = 147, n = 5),
                                                                argsGapFunc = list(value = 40, n = 7))
+if (use_region) scLayerSetNuc$layerSet[["nucleosome"]] <- subsetByOverlaps(scLayerSetNuc$layerSet[["nucleosome"]], region_gr, type = "within", ignore.strand = TRUE)
 total_nucs <- length(scLayerSetNuc$layerSet$nucleosome)
 rate_scale <- total_nucs / params$ref_nucs
 cat(sprintf("Nucleosomes on slice: %d (rate scale vs sacCer3 reference = %.4f)\n", total_nucs, rate_scale))
@@ -173,6 +190,9 @@ for (i in seq_along(motif_factors)) {
   cat(sprintf("  %-20s -> %-13s +%d regions\n", names(motif_factors)[i], lay, seed_report$regions_added[i]))
 }
 
+if (use_region) for (l in c("tf_K4_active", "tf_K9_active", "tf_K27_active")) {
+  scLayerSetNuc$layerSet[[l]] <- intersect(scLayerSetNuc$layerSet[[l]], region_gr, ignore.strand = TRUE)   # seeds outside the region are irrelevant
+}
 pool_cov <- function(layer) 100 * sum(width(reduce(scLayerSetNuc$layerSet[[layer]]))) / genome_size
 
 # Random fill up to target fraction of nucleosomes (as in the yeast model); K4 has no fill (motif-only pool)
@@ -180,15 +200,19 @@ fill_pool <- function(layer, target_frac) {
   in_pool <- unique(queryHits(findOverlaps(scLayerSetNuc$layerSet$nucleosome, scLayerSetNuc$layerSet[[layer]])))
   need <- round(target_frac * total_nucs) - length(in_pool)
   cat(sprintf("  %s: %d nucleosomes (%.1f%%) from motifs; target %.0f%%", layer, length(in_pool), 100 * length(in_pool) / total_nucs, 100 * target_frac))
+  pick <- integer(0)
   if (need > 0) {
     pick <- sample(setdiff(seq_len(total_nucs), in_pool), min(need, total_nucs - length(in_pool)))
     scLayerSetNuc$layerSet[[layer]] <<- c(scLayerSetNuc$layerSet[[layer]], scLayerSetNuc$layerSet$nucleosome[pick])
     cat(sprintf(" -> random fill +%d\n", length(pick)))
   } else cat(" -> motifs already exceed target, no fill\n")
-  invisible(length(in_pool))
+  nuc <- scLayerSetNuc$layerSet$nucleosome
+  invisible(list(n_motif = length(in_pool), motif = nuc[in_pool], fill = nuc[pick]))   # kept for the pool-vs-outcome readout
 }
-motif_nucs_K9 <- fill_pool("tf_K9_active", params$tf_K9_target_frac)
-motif_nucs_K27 <- fill_pool("tf_K27_active", params$tf_K27_target_frac)
+K9_pool_parts <- fill_pool("tf_K9_active", params$tf_K9_target_frac)
+K27_pool_parts <- fill_pool("tf_K27_active", params$tf_K27_target_frac)
+motif_nucs_K9 <- K9_pool_parts$n_motif
+motif_nucs_K27 <- K27_pool_parts$n_motif
 cat(sprintf("  tf_K4_active: %d regions, %.2f%% of slice (motif-only pool)\n", length(scLayerSetNuc$layerSet$tf_K4_active), pool_cov("tf_K4_active")))
 cat(sprintf("Pool coverage: K4 %.2f%% | K9 %.2f%% | K27 %.2f%%\n", pool_cov("tf_K4_active"), pool_cov("tf_K9_active"), pool_cov("tf_K27_active")))
 if (length(scLayerSetNuc$layerSet$tf_K4_active) == 0) cat("WARNING: tf_K4_active is empty (no TATA hit on this slice) -> no K4 marks can form.\n")
@@ -307,6 +331,7 @@ if (length(final$H3K27me3) > 0) {
 tx <- transcripts(TxDb.Dmelanogaster.UCSC.dm6.ensGene)
 tx <- tx[as.character(seqnames(tx)) %in% slice_chroms]
 prom <- suppressWarnings(trim(unique(promoters(tx, upstream = 300, downstream = 100))))
+if (use_region) prom <- subsetByOverlaps(prom, region_gr, ignore.strand = TRUE)
 tss_K4_frac <- NA; slice_K4_frac <- NA
 if (length(prom) > 0 && length(final$H3K4me3) > 0) {
   tss_K4_frac <- 100 * mean(countOverlaps(prom, final$H3K4me3) > 0)
@@ -314,6 +339,53 @@ if (length(prom) > 0 && length(final$H3K4me3) > 0) {
   cat(sprintf("\nK4me3 at annotated promoters: %.1f%% of %d promoters vs %.1f%% of all nucleosomes (%.1fx)\n",
               tss_K4_frac, length(prom), slice_K4_frac, tss_K4_frac / max(slice_K4_frac, 1e-9)))
   cat("  (K4 seeds come from TSS-specific TATA variants only, so <1x here means TATA seeds miss most promoters)\n")
+}
+
+
+# POOL MEMBERSHIP vs OUTCOME: does sequence seeding decide where each mark forms? ------------------------
+nuc <- final$nucleosome
+has_layer <- function(layers) {
+  v <- rep(FALSE, length(nuc))
+  for (l in layers) if (length(final[[l]]) > 0) v[unique(queryHits(findOverlaps(nuc, final[[l]])))] <- TRUE
+  v
+}
+pool_row <- function(mark, cls, member) {
+  me3 <- has_layer(paste0("H3", mark, "me3")); any_me <- has_layer(paste0("H3", mark, "me", 1:3))
+  data.frame(mark = mark, nucleosome_class = cls, n = sum(member), pct_with_me3 = round(100 * mean(me3[member]), 2),
+             pct_with_any_me = round(100 * mean(any_me[member]), 2))
+}
+in_K4 <- overlapsAny(nuc, final$tf_K4_active)
+in_K9_motif <- overlapsAny(nuc, K9_pool_parts$motif); in_K9_fill <- overlapsAny(nuc, K9_pool_parts$fill) & !in_K9_motif
+in_K27_motif <- overlapsAny(nuc, K27_pool_parts$motif); in_K27_fill <- overlapsAny(nuc, K27_pool_parts$fill) & !in_K27_motif
+pool_readout <- rbind(
+  pool_row("K4", "in tf_K4 pool (motif-seeded)", in_K4), pool_row("K4", "outside pool", !in_K4),
+  pool_row("K9", "K9 motif-seeded (satellite)", in_K9_motif), pool_row("K9", "K9 random-fill", in_K9_fill), pool_row("K9", "outside K9 pool", !(in_K9_motif | in_K9_fill)),
+  pool_row("K27", "K27 motif-seeded (PRE)", in_K27_motif), pool_row("K27", "K27 random-fill", in_K27_fill), pool_row("K27", "outside K27 pool", !(in_K27_motif | in_K27_fill)))
+cat("\n=== Pool membership vs outcome (share of nucleosomes carrying the mark) ===\n")
+print(pool_readout, row.names = FALSE)
+me3_K9 <- has_layer("H3K9me3")
+cat(sprintf("K9me3 nucleosomes outside the K9 pool: %.1f%% (K9 has no spreading factor, so ~0 expected)\n",
+            100 * sum(me3_K9 & !(in_K9_motif | in_K9_fill)) / max(sum(me3_K9), 1)))
+me3_K27 <- has_layer("H3K27me3")
+cat(sprintf("K27me3 nucleosomes outside the K27 pool: %.1f%% (K27 spreading, Rule 3A, is expected to leak outside)\n",
+            100 * sum(me3_K27 & !(in_K27_motif | in_K27_fill)) / max(sum(me3_K27), 1)))
+write.csv(pool_readout, paste0(outputDir, subSimName, ".pool_readout.csv"), row.names = FALSE)
+
+# K9me3 vs RepeatMasker satellite annotation (if the motif-scan download is present)
+rmsk_path <- "output/dm6_motifs/rmsk.txt.gz"
+sat_fold <- NA
+if (file.exists(rmsk_path)) {
+  rm_tab <- read.delim(gzfile(rmsk_path), header = FALSE, stringsAsFactors = FALSE)
+  rm_tab <- rm_tab[rm_tab$V12 == "Satellite" & rm_tab$V6 %in% slice_chroms, ]
+  sat_gr <- GRanges(rm_tab$V6, IRanges(rm_tab$V7 + 1, rm_tab$V8))
+  if (use_region) sat_gr <- subsetByOverlaps(sat_gr, region_gr, ignore.strand = TRUE)
+  if (length(sat_gr) > 0) {
+    on_sat <- overlapsAny(nuc, sat_gr)
+    sat_bp <- sum(width(reduce(sat_gr)))
+    k9_bp_in_sat <- sum(width(intersect(reduce(final$H3K9me3), reduce(sat_gr)))) / sat_bp * 100
+    cat(sprintf("\nRepeatMasker satellites in slice: %d (%.0f kb). K9me3 on satellite nucleosomes %.1f%% (n=%d) vs elsewhere %.1f%% (n=%d); %.1f%% of satellite bp are K9me3\n",
+                length(sat_gr), sat_bp / 1e3, 100 * mean(me3_K9[on_sat]), sum(on_sat), 100 * mean(me3_K9[!on_sat]), sum(!on_sat), k9_bp_in_sat))
+  }
 }
 
 
@@ -330,7 +402,7 @@ writeLines(c(
   sprintf('  "scored_states": [%s],', paste(sprintf('"%s"', sc), collapse = ", ")),
   '  "targets_are_placeholder": true,',
   '  "comparable_to_sacCer3_9state_RMSE": false,',
-  sprintf('  "slice": "%s",', params$chroms),
+  sprintf('  "slice": "%s",', slice_label),
   sprintf('  "nucleosomes": %d,', total_nucs),
   sprintf('  "rule1_K4me3_K27me3_pct": %.4f,', K4_K27),
   sprintf('  "rule2_K9me3_K4me3_pct": %.4f,', K9_K4),
