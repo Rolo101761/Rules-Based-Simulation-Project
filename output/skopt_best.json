@@ -1,0 +1,16 @@
+{
+  "best_value": 2.934844,
+  "objective": "RMSE_all",
+  "params": {
+    "meUp_sampler_K4": 19656,
+    "meDown_K4": 37573,
+    "meUp_sampler_K9": 18320,
+    "meDown_K9": 16128,
+    "meUp_sampler_K27": 14600,
+    "meDown_K27": 23145,
+    "K27_spread_abu": 6401,
+    "tf_K9_target_frac": 0.6144091867926935,
+    "tf_K27_target_frac": 0.264134627807624
+  },
+  "regenerated_from": "output/skopt_trials.csv; the original write crashed (np.int64 not JSON serializable, see end of skopt_run.log)"
+}
