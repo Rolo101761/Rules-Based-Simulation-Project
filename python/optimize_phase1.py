@@ -114,8 +114,9 @@ def main():
         random_state=args.random_state,
     )
 
-    best_params = dict(zip(param_names, res.x))
-    best = {"best_value": res.fun, "objective": args.objective, "params": best_params}
+    # skopt returns numpy scalars (np.int64 / np.float64), which json cannot serialise.
+    best_params = {name: v.item() if hasattr(v, "item") else v for name, v in zip(param_names, res.x)}
+    best = {"best_value": float(res.fun), "objective": args.objective, "params": best_params}
 
     best_path = REPO_ROOT / "output" / "skopt_best.json"
     with open(best_path, "w") as f:
