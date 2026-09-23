@@ -27,7 +27,7 @@ from sklearn.gaussian_process.kernels import ConstantKernel, Matern, WhiteKernel
 
 from skopt_sensitivity import N_RANDOM, load_trials
 
-# Short labels, in optimize_phase1.SPACE order.
+# Short labels, in optimize_phase1.PHASE1_SPACE order.
 SHORT = ["K4up", "K4dn", "K9up", "K9dn", "K27up", "K27dn", "spread", "tfK9", "tfK27"]
 IDX = {s: i for i, s in enumerate(SHORT)}
 BASIN_RMSE = 4.2  # trials below this count as "in the converged basin"

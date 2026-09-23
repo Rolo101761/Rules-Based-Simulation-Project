@@ -11,7 +11,7 @@ small (20 trials, 10 of them random) and any single one is easy to over-read:
   * Random-forest permutation importance
   * Spread of each parameter in the random phase (trials 1-10) vs the GP-guided phase (11-20)
 
-Search bounds come from optimize_phase1.SPACE, so they can't drift from the campaign.
+Search bounds come from optimize_phase1.PHASE1_SPACE (the space these trials were run with).
 
 Run from the repo root:
     .venv/bin/python python/skopt_sensitivity.py
@@ -26,7 +26,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import ConstantKernel, Matern, WhiteKernel
 
-from optimize_phase1 import SPACE
+from optimize_phase1 import PHASE1_SPACE as SPACE
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 TRIALS_CSV = REPO_ROOT / "output" / "skopt_trials.csv"
